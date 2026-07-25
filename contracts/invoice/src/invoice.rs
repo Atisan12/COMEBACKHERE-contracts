@@ -41,6 +41,8 @@ pub enum InvoiceError {
     TokenMismatch = 19,
     /// Batch input exceeds MAX_BATCH_SIZE.
     BatchTooLarge = 20,
+    /// create_invoice called again before CreationCooldown has elapsed for this merchant.
+    CooldownActive = 21,
 }
 
 #[contracttype]
@@ -133,4 +135,8 @@ pub enum DataKey {
     InvoiceHistory(u64),
     /// Global set of pending invoice IDs for efficient expiry enumeration.
     PendingIndex,
+    /// Admin-tunable minimum seconds between successive create_invoice calls per merchant.
+    CreationCooldown,
+    /// Timestamp of the last successful create_invoice call for a given merchant.
+    LastCreatedAt(Address),
 }

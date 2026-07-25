@@ -99,6 +99,26 @@ impl InvoiceContract {
             .unwrap_or(0u64)
     }
 
+    // --- #6: per-merchant invoice creation cooldown ---
+
+    /// Set the minimum number of seconds a merchant must wait between successive
+    /// create_invoice calls. 0 (default) disables the cooldown.
+    pub fn set_creation_cooldown(env: Env, admin: Address, seconds: u64) -> Result<(), InvoiceError> {
+        require_admin(&env, &admin)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::CreationCooldown, &seconds);
+        Ok(())
+    }
+
+    /// Return the current creation cooldown in seconds (0 if not set).
+    pub fn get_creation_cooldown(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::CreationCooldown)
+            .unwrap_or(0u64)
+    }
+
     /// Return the total number of invoices created so clients can page by id.
     pub fn get_invoice_count(env: Env) -> u64 {
         env.storage()
@@ -134,6 +154,23 @@ impl InvoiceContract {
     ) -> Result<u64, InvoiceError> {
         merchant.require_auth();
         require_not_paused(&env)?;
+
+        // #6: throttle repeated invoice creation per merchant to bound storage rent growth.
+        let now = env.ledger().timestamp();
+        let cooldown: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CreationCooldown)
+            .unwrap_or(0u64);
+        let last_key = DataKey::LastCreatedAt(merchant.clone());
+        if cooldown > 0 {
+            if let Some(last) = env.storage().persistent().get::<DataKey, u64>(&last_key) {
+                if now < last.saturating_add(cooldown) {
+                    return Err(InvoiceError::CooldownActive);
+                }
+            }
+        }
+
         require_positive_amount(amount_usdc, gross_usdc)?;
         // #57: USDC decimal precision guardrail
         require_usdc_precision(amount_usdc, gross_usdc)?;
@@ -194,6 +231,8 @@ impl InvoiceContract {
             .unwrap_or(Vec::new(&env));
         ids.push_back(id);
         env.storage().persistent().set(&idx_key, &ids);
+
+        env.storage().persistent().set(&last_key, &now);
 
         pending_index_add(&env, id);
         events::invoice_created(&env, id, &invoice);
