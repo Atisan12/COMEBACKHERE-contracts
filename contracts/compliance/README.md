@@ -16,3 +16,18 @@ The Compliance contract manages an allowlist of addresses permitted to interact 
 | `clear_address` | `admin` | `admin: Address, address: Address` | `Result<(), ContractError>` | `Unauthorized` |
 | `pause` | `admin` | `admin: Address` | `Result<(), ContractError>` | `Unauthorized` |
 | `unpause` | `admin` | `admin: Address` | `Result<(), ContractError>` | `Unauthorized` |
+
+## `is_allowed` precedence
+
+`is_allowed` evaluates state in a fixed order, and **Blocked overrides Allowed**:
+
+1. If the address is `Blocked`, `is_allowed` returns `false` — unless a `BlockedUntil`
+   timestamp is set and has passed, in which case the block has auto-expired and
+   evaluation falls through to step 2.
+2. Otherwise, if the address is not `Allowed`, `is_allowed` returns `false`.
+3. Otherwise, if an `AllowedUntil` expiry is set, `is_allowed` returns `true` only
+   while the current ledger timestamp is strictly less than that expiry.
+4. Otherwise (allowed, no expiry), `is_allowed` returns `true`.
+
+This means an address that is both `Allowed` and `Blocked` is treated as blocked;
+`clear_address` must be called to restore it to an allowed state.
