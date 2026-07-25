@@ -9,6 +9,9 @@ use multisig::{require_authorized_signer, signer_weight};
 use soroban_sdk::{contract, contractimpl, token, Address, Env, Symbol, Vec};
 
 const SETTLEMENT_TTL: u64 = 7 * 24 * 60 * 60;
+/// Minimum seconds a signer must wait between successive `propose_signer_rotation`
+/// calls, to prevent a compromised/malicious signer from spamming rotation proposals.
+const ROTATION_PROPOSAL_COOLDOWN: u64 = 60 * 60;
 
 #[contract]
 pub struct TreasuryContract;
@@ -867,6 +870,8 @@ impl TreasuryContract {
     }
 
     /// Proposes replacing `old_signer` with `new_signer` in the authorised signer set.
+    /// Panics: `UnauthorizedSigner`, `RotationProposalCooldown` if `proposer` submitted
+    /// another rotation proposal within [`ROTATION_PROPOSAL_COOLDOWN`] seconds.
     /// Emits: `rotation_proposed`.
     pub fn propose_signer_rotation(
         env: Env,
@@ -875,6 +880,18 @@ impl TreasuryContract {
         new_signer: Address,
     ) -> u64 {
         require_authorized_signer(&env, &proposer);
+        let now = env.ledger().timestamp();
+        let last_proposed: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LastRotationProposal(proposer.clone()))
+            .unwrap_or(0);
+        if last_proposed > 0 && now < last_proposed + ROTATION_PROPOSAL_COOLDOWN {
+            panic!("RotationProposalCooldown");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::LastRotationProposal(proposer.clone()), &now);
         let count: u64 = env
             .storage()
             .instance()
