@@ -880,6 +880,53 @@ fn bulk_allow_addresses_over_cap_is_rejected() {
     assert_eq!(result, Err(Ok(ContractError::BatchTooLarge)));
 }
 
+// ── #57 clear_address key-clearing completeness ───────────────────────────────
+
+/// clear_address must reset Blocked to false and set Allowed to true. It does
+/// NOT remove a pre-existing AllowedUntil expiry or BlockReason (see the
+/// clear_address doc comment in lib.rs) — this test pins down that exact
+/// behavior so a future accidental change in either direction is caught.
+#[test]
+fn clear_address_clears_blocked_and_allowed_flags() {
+    use compliance::AddressState;
+    let (_env, admin, subject, client) = setup();
+    client.block_address(&admin, &subject, &Some(soroban_sdk::Bytes::from_slice(&_env, b"bad")));
+    assert!(!client.is_allowed(&subject));
+
+    client.clear_address(&admin, &subject);
+
+    assert!(client.is_allowed(&subject));
+    assert_eq!(client.address_status(&admin, &subject), AddressState::Allowed);
+}
+
+#[test]
+fn clear_address_leaves_pre_existing_allowed_until_in_place() {
+    let (env, admin, subject, client) = setup();
+    let now = env.ledger().timestamp();
+    client.allow_address_until(&admin, &subject, &(now + 1000));
+    client.block_address(&admin, &subject, &None);
+
+    client.clear_address(&admin, &subject);
+
+    // AllowedUntil is intentionally not cleared by clear_address; the expiry
+    // set earlier is still present and still governs is_allowed.
+    assert_eq!(client.get_allow_expiry(&subject), Some(now + 1000));
+    assert!(client.is_allowed(&subject));
+}
+
+#[test]
+fn clear_address_leaves_pre_existing_block_reason_in_place() {
+    let (env, admin, subject, client) = setup();
+    let reason = soroban_sdk::Bytes::from_slice(&env, b"fraud");
+    client.block_address(&admin, &subject, &Some(reason.clone()));
+
+    client.clear_address(&admin, &subject);
+
+    // BlockReason is not cleared by clear_address.
+    assert_eq!(client.get_block_reason(&subject), Some(reason));
+    assert!(client.is_allowed(&subject));
+}
+
 #[test]
 fn bulk_block_addresses_over_cap_is_rejected() {
     let (env, admin, _, client) = setup();
