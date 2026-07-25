@@ -1079,6 +1079,7 @@ impl TreasuryContract {
         if settlement.status != SettlementStatus::OnHold {
             panic!("NotOnHold");
         }
+        let released_reason = settlement.hold_reason.clone();
         settlement.status = SettlementStatus::Pending;
         settlement.hold_reason = SettlementHoldReason::None;
         env.storage()
@@ -1086,7 +1087,7 @@ impl TreasuryContract {
             .set(&DataKey::Settlement(settlement_id), &settlement);
         env.events().publish(
             (Symbol::new(&env, "settlement_released"), settlement_id),
-            settlement,
+            released_reason,
         );
     }
 
