@@ -3,6 +3,10 @@ use soroban_sdk::{contracterror, contracttype, Address, Bytes};
 /// USDC on Stellar uses 7 decimal places: 1 USDC = 10_000_000 stroops.
 pub const USDC_FACTOR: i128 = 10_000_000;
 
+/// Maximum number of elements accepted by any batch entrypoint (batch_create_invoice,
+/// batch_expire) per call, to bound per-invocation storage writes and gas.
+pub const MAX_BATCH_SIZE: u32 = 50;
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -35,6 +39,8 @@ pub enum InvoiceError {
     NotRefundRequested = 18,
     /// Provided payment token does not match the invoice's expected token.
     TokenMismatch = 19,
+    /// Batch input exceeds MAX_BATCH_SIZE.
+    BatchTooLarge = 20,
 }
 
 #[contracttype]

@@ -211,6 +211,12 @@ impl InvoiceContract {
         merchant.require_auth();
         require_not_paused(&env)?;
 
+        // #18: bound batch size to cap per-invocation storage writes and gas,
+        // matching the batch_expire cap pattern.
+        if params.len() > invoice::MAX_BATCH_SIZE {
+            return Err(InvoiceError::BatchTooLarge);
+        }
+
         // Validate all params before touching storage (atomicity).
         let mut batch_nonces: Vec<u64> = Vec::new(&env);
         for p in params.iter() {
@@ -506,6 +512,12 @@ impl InvoiceContract {
     pub fn batch_expire(env: Env, admin: Address, ids: Vec<u64>) -> Result<u32, InvoiceError> {
         require_admin(&env, &admin)?;
         require_not_paused(&env)?;
+
+        // #18/#8: bound batch size to cap per-invocation storage writes and gas.
+        if ids.len() > invoice::MAX_BATCH_SIZE {
+            return Err(InvoiceError::BatchTooLarge);
+        }
+
         let now = env.ledger().timestamp();
         let mut expired_count: u32 = 0;
         for id in ids.iter() {
