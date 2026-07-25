@@ -12,7 +12,12 @@ pub enum ContractError {
     Unauthorized = 1,
     ContractPaused = 2,
     AlreadyInitialized = 3,
+    BatchTooLarge = 4,
 }
+
+/// Maximum number of addresses accepted per batch admin call, consistent with
+/// the batch caps used elsewhere in the workspace (see #8/#21/#29).
+pub const MAX_BATCH_SIZE: u32 = 50;
 
 #[contract]
 pub struct ComplianceContract;
@@ -47,6 +52,9 @@ impl ComplianceContract {
     ) -> Result<(), ContractError> {
         Self::require_admin(&env, &admin)?;
         Self::require_not_paused(&env)?;
+        if addresses.len() > MAX_BATCH_SIZE {
+            return Err(ContractError::BatchTooLarge);
+        }
         for address in addresses.iter() {
             let was_allowed: bool = env
                 .storage()
@@ -214,6 +222,9 @@ impl ComplianceContract {
         addresses: Vec<Address>,
     ) -> Result<(), ContractError> {
         Self::require_admin(&env, &admin)?;
+        if addresses.len() > MAX_BATCH_SIZE {
+            return Err(ContractError::BatchTooLarge);
+        }
         for address in addresses.iter() {
             env.storage()
                 .persistent()

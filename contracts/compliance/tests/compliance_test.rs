@@ -835,3 +835,58 @@ fn block_flag_overrides_allow_flag_in_is_allowed() {
     client.block_address(&admin, &subject, &None);
     assert!(!client.is_allowed(&subject));
 }
+
+// ── #46 Batch allow/block admin entrypoints ───────────────────────────────────
+
+#[test]
+fn bulk_allow_addresses_applies_to_every_address() {
+    let (env, admin, _, client) = setup();
+    let addrs: soroban_sdk::Vec<Address> = soroban_sdk::vec![
+        &env,
+        Address::generate(&env),
+        Address::generate(&env),
+        Address::generate(&env),
+    ];
+    client.bulk_allow_addresses(&admin, &addrs);
+    for addr in addrs.iter() {
+        assert!(client.is_allowed(&addr));
+    }
+}
+
+#[test]
+fn bulk_block_addresses_applies_to_every_address() {
+    let (env, admin, _, client) = setup();
+    let addrs: soroban_sdk::Vec<Address> = soroban_sdk::vec![
+        &env,
+        Address::generate(&env),
+        Address::generate(&env),
+        Address::generate(&env),
+    ];
+    client.bulk_allow_addresses(&admin, &addrs);
+    client.bulk_block_addresses(&admin, &addrs);
+    for addr in addrs.iter() {
+        assert!(!client.is_allowed(&addr));
+    }
+}
+
+#[test]
+fn bulk_allow_addresses_over_cap_is_rejected() {
+    let (env, admin, _, client) = setup();
+    let mut addrs: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    for _ in 0..(compliance::MAX_BATCH_SIZE + 1) {
+        addrs.push_back(Address::generate(&env));
+    }
+    let result = client.try_bulk_allow_addresses(&admin, &addrs);
+    assert_eq!(result, Err(Ok(ContractError::BatchTooLarge)));
+}
+
+#[test]
+fn bulk_block_addresses_over_cap_is_rejected() {
+    let (env, admin, _, client) = setup();
+    let mut addrs: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    for _ in 0..(compliance::MAX_BATCH_SIZE + 1) {
+        addrs.push_back(Address::generate(&env));
+    }
+    let result = client.try_bulk_block_addresses(&admin, &addrs);
+    assert_eq!(result, Err(Ok(ContractError::BatchTooLarge)));
+}
