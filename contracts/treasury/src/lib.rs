@@ -614,6 +614,37 @@ impl TreasuryContract {
             .unwrap_or_else(|| panic!("DisputeNotFound"))
     }
 
+    /// Returns a page of open (`Raised`) disputes: skips the first `start` entries and returns up to `limit`.
+    pub fn get_open_disputes_page(env: Env, start: u64, limit: u64) -> Vec<Dispute> {
+        let count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::DisputeCount)
+            .unwrap_or(0);
+        let mut page = Vec::new(&env);
+        let mut skipped: u64 = 0;
+        let mut id = 1u64;
+        while id <= count {
+            if let Some(dispute) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, Dispute>(&DataKey::Dispute(id))
+            {
+                if dispute.status == DisputeStatus::Raised {
+                    if skipped < start {
+                        skipped += 1;
+                    } else if (page.len() as u64) < limit {
+                        page.push_back(dispute);
+                    } else {
+                        break;
+                    }
+                }
+            }
+            id += 1;
+        }
+        page
+    }
+
     /// Resolves an open dispute in favour of claimant or counterparty (admin-only).
     /// When the last open dispute for a settlement is resolved, the settlement hold is released.
     /// Panics: `DisputeNotFound`, `DisputeAlreadyResolved`, `ContractPaused`.
