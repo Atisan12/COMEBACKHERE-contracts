@@ -886,6 +886,31 @@ fn bulk_allow_addresses_over_cap_is_rejected() {
 /// NOT remove a pre-existing AllowedUntil expiry or BlockReason (see the
 /// clear_address doc comment in lib.rs) — this test pins down that exact
 /// behavior so a future accidental change in either direction is caught.
+// ── #55 accept_admin authorization boundary ───────────────────────────────────
+
+#[test]
+fn accept_admin_rejects_non_pending_admin_caller() {
+    let (env, admin, _subject, client) = setup();
+    let new_admin = Address::generate(&env);
+    let unrelated = Address::generate(&env);
+    client.transfer_admin(&admin, &new_admin);
+
+    let result = client.try_accept_admin(&unrelated);
+    assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+}
+
+#[test]
+fn accept_admin_rejects_current_admin_self_accepting_others_transfer() {
+    let (env, admin, _subject, client) = setup();
+    let new_admin = Address::generate(&env);
+    client.transfer_admin(&admin, &new_admin);
+
+    // The current admin is not the pending admin, so it must not be able to
+    // accept a transfer that was nominated for someone else.
+    let result = client.try_accept_admin(&admin);
+    assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+}
+
 #[test]
 fn clear_address_clears_blocked_and_allowed_flags() {
     use compliance::AddressState;
