@@ -9,6 +9,7 @@ use multisig::{require_authorized_signer, signer_weight};
 use soroban_sdk::{contract, contractimpl, token, Address, Env, Symbol, Vec};
 
 const SETTLEMENT_TTL: u64 = 7 * 24 * 60 * 60;
+const MAX_SIGNERS: u32 = 25;
 
 #[contract]
 pub struct TreasuryContract;
@@ -77,6 +78,9 @@ impl TreasuryContract {
             .unwrap_or_else(|| Vec::new(&env));
         if weight > 0 {
             if !list.contains(&signer) {
+                if list.len() >= MAX_SIGNERS {
+                    panic!("MaxSignersReached");
+                }
                 list.push_back(signer.clone());
                 env.storage().instance().set(&DataKey::SignerList, &list);
             }
