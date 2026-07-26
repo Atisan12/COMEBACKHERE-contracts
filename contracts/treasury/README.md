@@ -35,3 +35,15 @@ The Treasury contract manages funds and settlements using a multi-signature appr
 | `get_merchant_payout_address` | None | `merchant: Address` | `Option<Address>` | None |
 | `hold_settlement` | `admin` | `admin: Address, settlement_id: u64, reason: SettlementHoldReason` | `()` | `Unauthorized`, `SettlementNotFound`, `AlreadyExecuted` |
 | `release_hold` | `admin` | `admin: Address, settlement_id: u64` | `()` | `Unauthorized`, `SettlementNotFound`, `NotOnHold` |
+
+## Settlement Hold Reasons
+
+`SettlementHoldReason` (defined in `crates/multisig/src/lib.rs`) is attached to a settlement via `hold_settlement` and cleared via `release_hold`. It records why a settlement was paused so operators and auditors can see which off-chain process is responsible for lifting the hold.
+
+| Variant | Used when | Set by (off-chain process) |
+|---------|-----------|-----------------------------|
+| `None` | Settlement is not on hold (default state). | N/A |
+| `ComplianceReview` | A settlement is flagged for manual compliance review before funds can move. | Compliance/AML review workflow |
+| `FraudCheck` | Suspicious activity is detected on the settlement or associated merchant. | Fraud detection / risk system |
+| `KycPending` | The merchant or counterparty has not completed KYC verification. | KYC/identity verification process |
+| `AdminHold` | An operator manually pauses a settlement for a reason not covered above. | Manual admin action |
