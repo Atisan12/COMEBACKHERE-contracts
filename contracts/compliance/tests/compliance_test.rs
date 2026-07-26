@@ -424,6 +424,59 @@ fn temp_allow_after_expiry_is_denied() {
 }
 
 #[test]
+fn compliance_expired_allow_lazy_check() {
+    // Verify that is_allowed checks AllowedUntil against ledger.timestamp
+    // and flips to false once past expiry, without requiring the sweep from #49 to run first.
+    // This is the core correctness property of the time-bound-allow feature.
+    let (env, admin, subject, client) = setup();
+    let now = env.ledger().timestamp();
+
+    // Set allow_address_until with expiry in the past
+    let past_expiry = now.saturating_sub(100);
+    client.allow_address_until(&admin, &subject, &past_expiry);
+
+    // Verify is_allowed returns false without any explicit sweep/cleanup
+    // The lazy check should happen directly in is_allowed
+    assert!(
+        !client.is_allowed(&subject),
+        "is_allowed should return false for expired AllowedUntil without sweep"
+    );
+
+    // Now set allow_address_until with expiry in the future
+    let future_expiry = now + 1000;
+    client.allow_address_until(&admin, &subject, &future_expiry);
+
+    // Verify is_allowed returns true before expiry
+    assert!(
+        client.is_allowed(&subject),
+        "is_allowed should return true before AllowedUntil expiry"
+    );
+
+    // Advance ledger time to just past expiry
+    let env_with_advanced_time = Env::default();
+    env_with_advanced_time.mock_all_auths();
+    env_with_advanced_time.ledger().set_timestamp(future_expiry);
+
+    // Register contract in the new environment and re-setup to test with advanced time
+    let admin2 = Address::generate(&env_with_advanced_time);
+    let subject2 = Address::generate(&env_with_advanced_time);
+    let id = env_with_advanced_time.register_contract(None, ComplianceContract);
+    let client2 = ComplianceContractClient::new(&env_with_advanced_time, &id);
+    client2.initialize(&admin2);
+
+    // Set expiry relative to the new environment's timestamp
+    let now2 = env_with_advanced_time.ledger().timestamp();
+    let expiry_at_now = now2;
+    client2.allow_address_until(&admin2, &subject2, &expiry_at_now);
+
+    // Verify expiry is evaluated lazily: timestamp == expires_at means NOT < expires_at → expired
+    assert!(
+        !client2.is_allowed(&subject2),
+        "is_allowed should return false when ledger.timestamp >= AllowedUntil"
+    );
+}
+
+#[test]
 fn temp_allow_blocked_address_is_denied_regardless_of_expiry() {
     let (env, admin, subject, client) = setup();
     let now = env.ledger().timestamp();
