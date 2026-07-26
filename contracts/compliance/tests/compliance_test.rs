@@ -835,3 +835,193 @@ fn block_flag_overrides_allow_flag_in_is_allowed() {
     client.block_address(&admin, &subject, &None);
     assert!(!client.is_allowed(&subject));
 }
+
+// ── block_address_until auto-expiry branch in is_allowed ──────────────────────
+
+#[test]
+fn block_until_before_unblock_time_is_denied() {
+    let (env, admin, subject, client) = setup();
+    let now = env.ledger().timestamp();
+    client.allow_address(&admin, &subject);
+    client.block_address_until(&admin, &subject, &(now + 1000), &None);
+    assert!(!client.is_allowed(&subject));
+}
+
+#[test]
+fn block_until_after_unblock_time_falls_through_to_allow() {
+    let (env, admin, subject, client) = setup();
+    let now = env.ledger().timestamp();
+    client.allow_address(&admin, &subject);
+    client.block_address_until(&admin, &subject, &(now + 1000), &None);
+    env.ledger().with_mut(|l| l.timestamp = now + 1000);
+    // block has expired and address was allowed -> allowed again
+    assert!(client.is_allowed(&subject));
+}
+
+#[test]
+fn block_until_expired_but_never_allowed_stays_denied() {
+    let (env, admin, subject, client) = setup();
+    let now = env.ledger().timestamp();
+    client.block_address_until(&admin, &subject, &(now + 1000), &None);
+    env.ledger().with_mut(|l| l.timestamp = now + 1000);
+    assert!(!client.is_allowed(&subject));
+}
+
+#[test]
+fn get_block_reason_returns_stored_reason() {
+    let (env, admin, subject, client) = setup();
+    let reason = soroban_sdk::Bytes::from_slice(&env, b"sanctions");
+    client.block_address(&admin, &subject, &Some(reason.clone()));
+    assert_eq!(client.get_block_reason(&subject), Some(reason));
+}
+
+#[test]
+fn get_block_reason_none_when_not_provided() {
+    let (_env, admin, subject, client) = setup();
+    client.block_address(&admin, &subject, &None);
+    assert_eq!(client.get_block_reason(&subject), None);
+}
+
+// ── bulk_allow_addresses / bulk_block_addresses ────────────────────────────────
+
+#[test]
+fn bulk_allow_addresses_allows_all_and_untracks_expiry() {
+    let (env, admin, subject, client) = setup();
+    let other = Address::generate(&env);
+    // subject already has a temp expiry; bulk allow should clear it (permanent)
+    let now = env.ledger().timestamp();
+    client.allow_address_until(&admin, &subject, &(now + 10));
+    let addrs = soroban_sdk::vec![&env, subject.clone(), other.clone()];
+    client.bulk_allow_addresses(&admin, &addrs);
+    env.ledger().with_mut(|l| l.timestamp = now + 100);
+    assert!(client.is_allowed(&subject));
+    assert!(client.is_allowed(&other));
+}
+
+#[test]
+fn bulk_allow_addresses_unauthorized_for_non_admin() {
+    let (env, _admin, subject, client) = setup();
+    let non_admin = Address::generate(&env);
+    let addrs = soroban_sdk::vec![&env, subject];
+    let result = client.try_bulk_allow_addresses(&non_admin, &addrs);
+    assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+}
+
+#[test]
+fn bulk_allow_addresses_rejected_when_paused() {
+    let (env, admin, subject, client) = setup();
+    client.pause(&admin);
+    let addrs = soroban_sdk::vec![&env, subject];
+    let result = client.try_bulk_allow_addresses(&admin, &addrs);
+    assert_eq!(result, Err(Ok(ContractError::ContractPaused)));
+}
+
+#[test]
+fn bulk_block_addresses_blocks_all() {
+    let (env, admin, _, client) = setup();
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    client.allow_address(&admin, &a);
+    client.allow_address(&admin, &b);
+    let addrs = soroban_sdk::vec![&env, a.clone(), b.clone()];
+    client.bulk_block_addresses(&admin, &addrs);
+    assert!(!client.is_allowed(&a));
+    assert!(!client.is_allowed(&b));
+}
+
+#[test]
+fn bulk_block_addresses_unauthorized_for_non_admin() {
+    let (env, _admin, subject, client) = setup();
+    let non_admin = Address::generate(&env);
+    let addrs = soroban_sdk::vec![&env, subject];
+    let result = client.try_bulk_block_addresses(&non_admin, &addrs);
+    assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+}
+
+// ── allow_address_with_tier / get_address_tier ─────────────────────────────────
+
+#[test]
+fn allow_address_with_tier_sets_tier_and_allows() {
+    let (_env, admin, subject, client) = setup();
+    client.allow_address_with_tier(&admin, &subject, &2);
+    assert!(client.is_allowed(&subject));
+    assert_eq!(client.get_address_tier(&subject), 2);
+}
+
+#[test]
+fn get_address_tier_defaults_to_zero() {
+    let (_env, _admin, subject, client) = setup();
+    assert_eq!(client.get_address_tier(&subject), 0);
+}
+
+// ── get_schema_version / get_allow_expiry ──────────────────────────────────────
+
+#[test]
+fn get_schema_version_returns_one_after_init() {
+    let (_env, _admin, _subject, client) = setup();
+    assert_eq!(client.get_schema_version(), 1);
+}
+
+#[test]
+fn get_allow_expiry_returns_none_for_permanent_allow() {
+    let (_env, admin, subject, client) = setup();
+    client.allow_address(&admin, &subject);
+    assert_eq!(client.get_allow_expiry(&subject), None);
+}
+
+#[test]
+fn get_allow_expiry_returns_timestamp_for_temp_allow() {
+    let (env, admin, subject, client) = setup();
+    let expires_at = env.ledger().timestamp() + 500;
+    client.allow_address_until(&admin, &subject, &expires_at);
+    assert_eq!(client.get_allow_expiry(&subject), Some(expires_at));
+}
+
+// ── set_operator / address_status operator & unauthorized paths ───────────────
+
+#[test]
+fn operator_can_call_address_status() {
+    use compliance::AddressState;
+    let (env, admin, subject, client) = setup();
+    let operator = Address::generate(&env);
+    client.set_operator(&admin, &operator);
+    client.allow_address(&admin, &subject);
+    let state = client.address_status(&operator, &subject);
+    assert_eq!(state, AddressState::Allowed);
+}
+
+#[test]
+fn address_status_unauthorized_for_neither_admin_nor_operator() {
+    let (env, admin, subject, client) = setup();
+    let operator = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    client.set_operator(&admin, &operator);
+    let result = client.try_address_status(&stranger, &subject);
+    assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+}
+
+// ── export_snapshot pagination ─────────────────────────────────────────────────
+
+#[test]
+fn export_snapshot_respects_offset_and_limit() {
+    let (env, admin, _, client) = setup();
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+    client.allow_address(&admin, &a);
+    client.allow_address(&admin, &b);
+    client.allow_address(&admin, &c);
+
+    let page = client.export_snapshot(&admin, &1, &1);
+    assert_eq!(page.len(), 1);
+    assert_eq!(page.get(0).unwrap().0, b);
+}
+
+#[test]
+fn export_snapshot_limit_beyond_len_returns_remaining() {
+    let (env, admin, _, client) = setup();
+    let a = Address::generate(&env);
+    client.allow_address(&admin, &a);
+    let page = client.export_snapshot(&admin, &0, &10);
+    assert_eq!(page.len(), 1);
+}
