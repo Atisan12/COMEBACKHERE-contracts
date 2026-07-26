@@ -835,3 +835,130 @@ fn block_flag_overrides_allow_flag_in_is_allowed() {
     client.block_address(&admin, &subject, &None);
     assert!(!client.is_allowed(&subject));
 }
+
+// ── #46 Batch allow/block admin entrypoints ───────────────────────────────────
+
+#[test]
+fn bulk_allow_addresses_applies_to_every_address() {
+    let (env, admin, _, client) = setup();
+    let addrs: soroban_sdk::Vec<Address> = soroban_sdk::vec![
+        &env,
+        Address::generate(&env),
+        Address::generate(&env),
+        Address::generate(&env),
+    ];
+    client.bulk_allow_addresses(&admin, &addrs);
+    for addr in addrs.iter() {
+        assert!(client.is_allowed(&addr));
+    }
+}
+
+#[test]
+fn bulk_block_addresses_applies_to_every_address() {
+    let (env, admin, _, client) = setup();
+    let addrs: soroban_sdk::Vec<Address> = soroban_sdk::vec![
+        &env,
+        Address::generate(&env),
+        Address::generate(&env),
+        Address::generate(&env),
+    ];
+    client.bulk_allow_addresses(&admin, &addrs);
+    client.bulk_block_addresses(&admin, &addrs);
+    for addr in addrs.iter() {
+        assert!(!client.is_allowed(&addr));
+    }
+}
+
+#[test]
+fn bulk_allow_addresses_over_cap_is_rejected() {
+    let (env, admin, _, client) = setup();
+    let mut addrs: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    for _ in 0..(compliance::MAX_BATCH_SIZE + 1) {
+        addrs.push_back(Address::generate(&env));
+    }
+    let result = client.try_bulk_allow_addresses(&admin, &addrs);
+    assert_eq!(result, Err(Ok(ContractError::BatchTooLarge)));
+}
+
+// ── #57 clear_address key-clearing completeness ───────────────────────────────
+
+/// clear_address must reset Blocked to false and set Allowed to true. It does
+/// NOT remove a pre-existing AllowedUntil expiry or BlockReason (see the
+/// clear_address doc comment in lib.rs) — this test pins down that exact
+/// behavior so a future accidental change in either direction is caught.
+// ── #55 accept_admin authorization boundary ───────────────────────────────────
+
+#[test]
+fn accept_admin_rejects_non_pending_admin_caller() {
+    let (env, admin, _subject, client) = setup();
+    let new_admin = Address::generate(&env);
+    let unrelated = Address::generate(&env);
+    client.transfer_admin(&admin, &new_admin);
+
+    let result = client.try_accept_admin(&unrelated);
+    assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+}
+
+#[test]
+fn accept_admin_rejects_current_admin_self_accepting_others_transfer() {
+    let (env, admin, _subject, client) = setup();
+    let new_admin = Address::generate(&env);
+    client.transfer_admin(&admin, &new_admin);
+
+    // The current admin is not the pending admin, so it must not be able to
+    // accept a transfer that was nominated for someone else.
+    let result = client.try_accept_admin(&admin);
+    assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+}
+
+#[test]
+fn clear_address_clears_blocked_and_allowed_flags() {
+    use compliance::AddressState;
+    let (_env, admin, subject, client) = setup();
+    client.block_address(&admin, &subject, &Some(soroban_sdk::Bytes::from_slice(&_env, b"bad")));
+    assert!(!client.is_allowed(&subject));
+
+    client.clear_address(&admin, &subject);
+
+    assert!(client.is_allowed(&subject));
+    assert_eq!(client.address_status(&admin, &subject), AddressState::Allowed);
+}
+
+#[test]
+fn clear_address_leaves_pre_existing_allowed_until_in_place() {
+    let (env, admin, subject, client) = setup();
+    let now = env.ledger().timestamp();
+    client.allow_address_until(&admin, &subject, &(now + 1000));
+    client.block_address(&admin, &subject, &None);
+
+    client.clear_address(&admin, &subject);
+
+    // AllowedUntil is intentionally not cleared by clear_address; the expiry
+    // set earlier is still present and still governs is_allowed.
+    assert_eq!(client.get_allow_expiry(&subject), Some(now + 1000));
+    assert!(client.is_allowed(&subject));
+}
+
+#[test]
+fn clear_address_leaves_pre_existing_block_reason_in_place() {
+    let (env, admin, subject, client) = setup();
+    let reason = soroban_sdk::Bytes::from_slice(&env, b"fraud");
+    client.block_address(&admin, &subject, &Some(reason.clone()));
+
+    client.clear_address(&admin, &subject);
+
+    // BlockReason is not cleared by clear_address.
+    assert_eq!(client.get_block_reason(&subject), Some(reason));
+    assert!(client.is_allowed(&subject));
+}
+
+#[test]
+fn bulk_block_addresses_over_cap_is_rejected() {
+    let (env, admin, _, client) = setup();
+    let mut addrs: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    for _ in 0..(compliance::MAX_BATCH_SIZE + 1) {
+        addrs.push_back(Address::generate(&env));
+    }
+    let result = client.try_bulk_block_addresses(&admin, &addrs);
+    assert_eq!(result, Err(Ok(ContractError::BatchTooLarge)));
+}
