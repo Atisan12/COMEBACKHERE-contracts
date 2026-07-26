@@ -550,6 +550,33 @@ impl ComplianceContract {
         result
     }
 
+    /// Returns a page of tracked addresses and their current state: skips the first
+    /// `start` entries and returns up to `limit`, following the same pagination
+    /// convention as treasury's `get_pending_settlements_page`.
+    pub fn export_snapshot_page(
+        env: Env,
+        admin: Address,
+        start: u64,
+        limit: u64,
+    ) -> Vec<(Address, AddressState)> {
+        Self::require_admin(&env, &admin).unwrap();
+        let index: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AddressIndex)
+            .unwrap_or(Vec::new(&env));
+        let mut result = Vec::new(&env);
+        let total = index.len() as u64;
+        let mut i = start;
+        while i < total && (result.len() as u64) < limit {
+            let addr = index.get(i as u32).unwrap();
+            let state = Self::address_state(&env, &addr);
+            result.push_back((addr, state));
+            i += 1;
+        }
+        result
+    }
+
     /// Returns the compliance state for `address` (Allowed, Blocked, or Expired).
     /// Requires admin or operator authentication.
     pub fn address_status(
